@@ -1,0 +1,7 @@
+{
+  "name": "WE-Zayed Student Results Portal",
+  "description": "A professional portal for students of WE-Zayed Applied Technology School to check their academic results and interact with an AI educational assistant.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
