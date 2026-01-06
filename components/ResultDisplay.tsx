@@ -26,8 +26,14 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ student, onBack }) => {
 
     setIsGenerating(true);
 
-    // @ts-ignore
-    const html2pdf = window.html2pdf;
+    // Access html2pdf from window safely for TS
+    const html2pdf = (window as any).html2pdf;
+
+    if (!html2pdf) {
+      alert("عذراً، لم يتم تحميل مكتبة PDF بشكل صحيح. يرجى المحاولة مرة أخرى.");
+      setIsGenerating(false);
+      return;
+    }
 
     const opt = {
       margin: [10, 10, 10, 10],
@@ -49,7 +55,6 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ student, onBack }) => {
 
   return (
     <div className="max-w-4xl mx-auto mt-8 mb-20 animate-fadeIn text-right">
-      {/* أزرار التحكم */}
       <div className="flex justify-between items-center mb-8 no-print px-4">
         <button 
           onClick={onBack}
@@ -77,12 +82,10 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ student, onBack }) => {
         </button>
       </div>
 
-      {/* حاوية النتيجة الأصلية المحسنة */}
       <div 
         id="printable-result" 
         className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-gray-100"
       >
-        {/* الهيدر */}
         <div className="bg-[#4b0082] p-8 text-white relative">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <div>
@@ -104,7 +107,6 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ student, onBack }) => {
         </div>
 
         <div className="p-8 space-y-6">
-          {/* جدول الدرجات - تم تقليل المسافات gap-1.5 */}
           <section>
             <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
               <span className="w-1.5 h-6 bg-[#e60000] rounded-full"></span>
@@ -128,7 +130,6 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ student, onBack }) => {
             </div>
           </section>
 
-          {/* الرسم البياني - تم تقليل الارتفاع وتصغير حجم الأعمدة barSize */}
           <section className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
             <h4 className="text-[10px] font-bold text-gray-400 mb-4 text-center uppercase tracking-widest">التحليل البياني للمستوى</h4>
             <div className="h-[240px] w-full" dir="ltr">
@@ -157,7 +158,6 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ student, onBack }) => {
           </section>
         </div>
 
-        {/* فوتر النتيجة */}
         <div className="p-6 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
           <div className="text-right">
             <p className="text-[#4b0082] font-bold text-xs">مدرسة WE للكنولوجيا التطبيقية</p>

@@ -3,8 +3,12 @@ import { GoogleGenAI } from "@google/genai";
 import { ChatMessage } from "../types";
 
 export class GeminiService {
-  // Always use the named parameter and direct process.env access
-  private ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  private ai: GoogleGenAI;
+
+  constructor() {
+    const apiKey = process.env.API_KEY || "";
+    this.ai = new GoogleGenAI({ apiKey });
+  }
 
   async chat(history: ChatMessage[], message: string): Promise<string> {
     const model = 'gemini-3-flash-preview';
@@ -17,7 +21,6 @@ export class GeminiService {
     `;
 
     try {
-      // Use config.systemInstruction for improved guidance
       const response = await this.ai.models.generateContent({
         model,
         contents: [
@@ -33,7 +36,6 @@ export class GeminiService {
         }
       });
 
-      // Use the text property (not a method)
       return response.text || "عذراً، لم أتمكن من معالجة طلبك حالياً.";
     } catch (error) {
       console.error("Gemini Error:", error);
