@@ -9,8 +9,11 @@ import { Student } from './types';
 import { MOCK_STUDENTS } from './constants';
 import * as XLSX from 'xlsx';
 
-// ضع رابط الـ CSV الخاص بك هنا بين القوسين ليصبح افتراضياً لكل الطلاب
-const DEFAULT_CLOUD_URL = ""; 
+/**
+ * هام جداً: ضع رابط الـ CSV الذي حصلت عليه من Google Sheets هنا.
+ * اذهب لشيت جوجل -> File -> Share -> Publish to web -> اختر صيغة CSV -> انسخ الرابط وضعه هنا.
+ */
+const DEFAULT_CLOUD_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS-qU7U-7X-Y9-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y-Y/pub?output=csv"; 
 
 const App: React.FC = () => {
   const [allStudents, setAllStudents] = useState<Student[]>(MOCK_STUDENTS);
@@ -20,6 +23,7 @@ const App: React.FC = () => {
   const [password, setPassword] = useState('');
   const [passError, setPassError] = useState(false);
   const [isLoadingCloud, setIsLoadingCloud] = useState(false);
+  // نتحقق أولاً من التخزين المحلي، إذا لم يوجد نستخدم الرابط الافتراضي المثبت في الكود
   const [cloudUrl, setCloudUrl] = useState(localStorage.getItem('we_zayed_cloud_url') || DEFAULT_CLOUD_URL);
 
   const handleBackToSearch = () => setSelectedStudent(null);
@@ -88,7 +92,8 @@ const App: React.FC = () => {
     setIsLoadingCloud(true);
     try {
       const separator = url.includes('?') ? '&' : '?';
-      const finalUrl = `${url}${separator}cache_bust=${Date.now()}`;
+      // إضافة t= لمنع المتصفح من جلب نسخة قديمة
+      const finalUrl = `${url}${separator}t=${Date.now()}`;
       
       const res = await fetch(finalUrl);
       if (!res.ok) throw new Error("Connection failed");
@@ -99,7 +104,6 @@ const App: React.FC = () => {
       
       if (students.length > 0) {
         setAllStudents(students);
-        // حفظ البيانات محلياً أيضاً كنسخة احتياطية
         localStorage.setItem('we_zayed_students', JSON.stringify(students));
       }
     } catch (e) {
@@ -109,15 +113,9 @@ const App: React.FC = () => {
     }
   }, [processData]);
 
-  // جلب البيانات عند فتح التطبيق مباشرة
   useEffect(() => {
     if (cloudUrl) {
       fetchCloudData(cloudUrl);
-    } else {
-      const saved = localStorage.getItem('we_zayed_students');
-      if (saved) {
-        try { setAllStudents(JSON.parse(saved)); } catch(e) {}
-      }
     }
   }, [cloudUrl, fetchCloudData]);
 
@@ -130,7 +128,7 @@ const App: React.FC = () => {
   const saveCloudUrl = () => {
     localStorage.setItem('we_zayed_cloud_url', cloudUrl);
     fetchCloudData(cloudUrl);
-    alert("تم تفعيل الرابط السحابي بنجاح!");
+    alert("تم تحديث الرابط بنجاح.");
   };
 
   return (
@@ -144,9 +142,9 @@ const App: React.FC = () => {
       {showPassModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center">
           <div className="bg-white p-8 rounded-3xl w-full max-w-xs shadow-2xl animate-fadeIn">
-            <h3 className="text-center font-black mb-4">لوحة التحكم</h3>
+            <h3 className="text-center font-black mb-4">كلمة مرور الإدارة</h3>
             <form onSubmit={handleAdminAuth} className="space-y-4">
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className={`w-full p-3 bg-gray-100 rounded-xl text-center outline-none border-2 ${passError ? 'border-red-500' : 'border-transparent'}`} placeholder="كلمة المرور" autoFocus />
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className={`w-full p-3 bg-gray-100 rounded-xl text-center outline-none border-2 ${passError ? 'border-red-500' : 'border-transparent'}`} placeholder="Password" autoFocus />
               <button className="w-full bg-[#4b0082] text-white py-3 rounded-xl font-bold">دخول</button>
             </form>
           </div>
@@ -159,11 +157,11 @@ const App: React.FC = () => {
         ) : (
           <div className="animate-fadeIn">
             <div className="text-center mb-12">
-              <h2 className="text-4xl font-black text-gray-900 mb-2">بوابة نتائج مدرسة WE زايد</h2>
-              <p className="text-gray-500">الاستعلام الرسمي عن النتائج</p>
+              <h2 className="text-4xl font-black text-gray-900 mb-2">مدرسة WE زايد</h2>
+              <p className="text-gray-500">الاستعلام عن النتائج الرسمية</p>
               {isLoadingCloud && (
-                <div className="mt-6 flex items-center justify-center gap-2 text-[#e60000] font-bold animate-pulse">
-                  <span>جاري تحديث البيانات من السحابة...</span>
+                <div className="mt-6 text-[#e60000] font-bold animate-pulse">
+                  جاري جلب أحدث البيانات...
                 </div>
               )}
             </div>
@@ -171,17 +169,17 @@ const App: React.FC = () => {
             {isAdminMode ? (
               <div className="max-w-2xl mx-auto space-y-6">
                 <div className="bg-white p-8 rounded-3xl shadow-xl border border-purple-100">
-                  <h3 className="font-black text-lg text-gray-800 mb-4">إعدادات الربط السحابي</h3>
+                  <h3 className="font-black text-lg mb-4">تحديث الرابط السحابي</h3>
                   <div className="flex flex-col gap-3">
                     <input 
                       type="text" 
                       value={cloudUrl} 
                       onChange={e => setCloudUrl(e.target.value)} 
-                      placeholder="رابط CSV الخاص بجوجل شيت..." 
-                      className="w-full p-4 bg-gray-50 rounded-2xl border border-gray-200 text-sm outline-none" 
+                      placeholder="رابط CSV..." 
+                      className="w-full p-4 bg-gray-50 rounded-2xl border border-gray-200" 
                     />
-                    <button onClick={saveCloudUrl} className="w-full bg-[#4b0082] text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-[#390066]">
-                      تحديث الرابط للجميع
+                    <button onClick={saveCloudUrl} className="w-full bg-[#4b0082] text-white py-4 rounded-2xl font-bold">
+                      حفظ وتحديث للجميع
                     </button>
                   </div>
                 </div>
