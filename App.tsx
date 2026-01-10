@@ -1,11 +1,13 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Header from './components/Header';
 import StudentSearch from './components/StudentSearch';
 import ResultDisplay from './components/ResultDisplay';
 import FileUpload from './components/FileUpload';
+import GeminiChat from './components/GeminiChat';
 import { Student } from './types';
 import { MOCK_STUDENTS } from './constants';
+import * as XLSX from 'xlsx';
 
 const App: React.FC = () => {
   const [allStudents, setAllStudents] = useState<Student[]>(MOCK_STUDENTS);
@@ -14,122 +16,152 @@ const App: React.FC = () => {
   const [showPassModal, setShowPassModal] = useState(false);
   const [password, setPassword] = useState('');
   const [passError, setPassError] = useState(false);
+  const [isLoadingCloud, setIsLoadingCloud] = useState(false);
+  const [cloudUrl, setCloudUrl] = useState(localStorage.getItem('we_zayed_cloud_url') || '');
 
-  useEffect(() => {
-    const saved = localStorage.getItem('we_zayed_students');
-    if (saved) {
-      try {
-        setAllStudents(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to load saved students", e);
-      }
-    }
-  }, []);
+  // Fixed: Added handleBackToSearch function
+  const handleBackToSearch = () => {
+    setSelectedStudent(null);
+  };
 
+  // Fixed: Added handleDataLoaded function
   const handleDataLoaded = (students: Student[]) => {
     setAllStudents(students);
     localStorage.setItem('we_zayed_students', JSON.stringify(students));
-    setIsAdminMode(false);
-    setShowPassModal(false);
   };
 
-  const handleBackToSearch = () => {
-    setSelectedStudent(null);
-    setIsAdminMode(false);
-    setShowPassModal(false);
-  };
+  // وظيفة معالجة البيانات الموحدة
+  const processData = useCallback((workbook: XLSX.WorkBook) => {
+    let allParsed: Student[] = [];
+    const normalize = (str: any) => String(str || "").trim().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, '').toLowerCase();
+    
+    const findVal = (row: any, search: string[]) => {
+      const keys = Object.keys(row);
+      const target = search.map(normalize);
+      const found = keys.find(k => target.some(t => normalize(k).includes(t)));
+      return found ? row[found] : null;
+    };
+
+    const configs = [{ n: "Grade one", l: '1' as const }, { n: "Grade two", l: '2' as const }];
+    
+    configs.forEach(conf => {
+      const sName = workbook.SheetNames.find(n => normalize(n).includes(normalize(conf.n)));
+      if (!sName) return;
+      const data = XLSX.utils.sheet_to_json(workbook.Sheets[sName]) as any[];
+      
+      const mapped = data.map((row, idx): Student | null => {
+        const nid = String(findVal(row, ["الرقم القومي", "ID", "National"]) || "").replace(/\D/g, '');
+        if (nid.length < 10) return null;
+        
+        const subs = [
+          { n: "اللغة العربية", s: ["عربي", "Arabic"] },
+          { n: "التربية الدينية", s: ["دين", "Religion"] },
+          { n: "Advanced Math", s: ["Math", "رياضيات"] },
+          { n: "التربية الوطنية", s: ["وطنيه", "National"] },
+          { n: "Advanced Physics", s: ["Physics", "فيزياء"] },
+          { n: "الدراسات الفنية", s: ["فنيه", "Technical"] },
+          { n: "Advanced English", s: ["انجليزي", "English"] }
+        ];
+
+        return {
+          id: `${conf.l}-${idx}`,
+          name: String(findVal(row, ["الاسم", "Name"]) || "طالب"),
+          seatingNumber: String(findVal(row, ["جلوس", "Seating"]) || "0"),
+          nationalId: nid,
+          class: String(findVal(row, ["فصل", "Class"]) || "-"),
+          gradeLevel: conf.l,
+          specialization: "Programming",
+          grades: subs.map(s => ({ name: s.n, score: Number(findVal(row, s.s) || 0), maxScore: 50, status: Number(findVal(row, s.s)) >= 25 ? 'Pass' : 'Fail' })),
+          gpa: 0
+        };
+      }).filter((s): s is Student => s !== null);
+      allParsed = [...allParsed, ...mapped];
+    });
+    return allParsed;
+  }, []);
+
+  const fetchCloudData = useCallback(async (url: string) => {
+    if (!url.startsWith('http')) return;
+    setIsLoadingCloud(true);
+    try {
+      const res = await fetch(url);
+      const ab = await res.arrayBuffer();
+      const wb = XLSX.read(new Uint8Array(ab), { type: 'array' });
+      const students = processData(wb);
+      if (students.length > 0) {
+        setAllStudents(students);
+        console.log("Cloud Sync Success:", students.length);
+      }
+    } catch (e) {
+      console.error("Sync Error", e);
+    } finally {
+      setIsLoadingCloud(false);
+    }
+  }, [processData]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('we_zayed_students');
+    if (cloudUrl) {
+      fetchCloudData(cloudUrl);
+    } else if (saved) {
+      setAllStudents(JSON.parse(saved));
+    }
+  }, [cloudUrl, fetchCloudData]);
 
   const handleAdminAuth = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === '1234') {
-      setIsAdminMode(true);
-      setShowPassModal(false);
-      setPassword('');
-      setPassError(false);
-    } else {
-      setPassError(true);
-      setTimeout(() => setPassError(false), 2000);
-    }
+    if (password === '1234') { setIsAdminMode(true); setShowPassModal(false); setPassword(''); }
+    else { setPassError(true); setTimeout(() => setPassError(false), 2000); }
   };
 
-  const toggleAdminTrigger = () => {
-    if (isAdminMode) {
-      setIsAdminMode(false);
-    } else {
-      setShowPassModal(true);
-    }
+  const saveCloudUrl = () => {
+    localStorage.setItem('we_zayed_cloud_url', cloudUrl);
+    fetchCloudData(cloudUrl);
+    alert("تم حفظ رابط المزامنة السحابية بنجاح.");
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20 relative">
-      <Header 
-        onHomeClick={handleBackToSearch} 
-        showHomeLink={!!selectedStudent} 
-      />
-
-      {/* Admin Toggle Trigger (Gear Icon) */}
-      <button 
-        onClick={toggleAdminTrigger}
-        className={`fixed top-24 left-6 z-40 p-3 rounded-full shadow-lg transition-all transform hover:rotate-90 ${isAdminMode ? 'bg-[#e60000] text-white' : 'bg-white text-gray-400 hover:text-[#4b0082]'}`}
-        title={isAdminMode ? "الخروج من وضع المسؤول" : "إعدادات المسؤول"}
-      >
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
+    <div className="min-h-screen bg-[#f8fafc] pb-20 relative font-['Cairo']">
+      <Header onHomeClick={handleBackToSearch} showHomeLink={!!selectedStudent} />
+      
+      <button onClick={() => isAdminMode ? setIsAdminMode(false) : setShowPassModal(true)} className="fixed top-24 left-6 z-40 p-3 bg-white rounded-full shadow-lg text-gray-400">
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /></svg>
       </button>
 
-      {/* Password Modal */}
       {showPassModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl animate-fadeIn">
-            <h3 className="text-xl font-black text-center mb-6 text-gray-800">الدخول للمسؤول</h3>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center">
+          <div className="bg-white p-8 rounded-3xl w-full max-w-xs shadow-2xl">
+            <h3 className="text-center font-black mb-4">كلمة مرور الإدارة</h3>
             <form onSubmit={handleAdminAuth} className="space-y-4">
-              <input 
-                type="password" 
-                placeholder="كلمة المرور"
-                autoFocus
-                className={`w-full px-6 py-4 rounded-2xl border-2 text-center text-xl font-bold outline-none transition-all ${passError ? 'border-red-500 bg-red-50 animate-shake' : 'border-gray-100 bg-gray-50 focus:border-[#4b0082]'}`}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              <div className="flex gap-3">
-                <button type="submit" className="flex-1 bg-[#4b0082] text-white py-3 rounded-xl font-bold hover:bg-[#390066] transition-colors">دخول</button>
-                <button type="button" onClick={() => setShowPassModal(false)} className="px-6 py-3 rounded-xl font-bold text-gray-400 hover:text-gray-600 transition-colors">إلغاء</button>
-              </div>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-3 bg-gray-100 rounded-xl text-center outline-none border-2 border-transparent focus:border-purple-600" autoFocus />
+              <button className="w-full bg-[#4b0082] text-white py-3 rounded-xl font-bold">دخول</button>
             </form>
           </div>
         </div>
       )}
-      
+
       <main className="container mx-auto px-4 pt-12">
         {selectedStudent ? (
           <ResultDisplay student={selectedStudent} onBack={handleBackToSearch} />
         ) : (
           <div className="animate-fadeIn">
-            <div className="text-center mb-12 animate-fadeInDown">
-              <h2 className="text-4xl font-black text-gray-900 mb-4">بوابة الطالب الإلكترونية</h2>
-              <p className="text-lg text-gray-600 max-w-none mx-auto md:whitespace-nowrap px-4">
-                مرحباً بك في البوابة المخصصة لطلاب مدرسة WE-Zayed. 
-                اختر <span className="text-[#4b0082] font-bold">صفك الدراسي</span> ثم ادخل <span className="text-[#e60000] font-bold">رقمك القومي</span>.
-              </p>
+            <div className="text-center mb-12">
+              <h2 className="text-4xl font-black text-gray-900 mb-2">بوابة نتائج مدرسة WE زايد</h2>
+              <p className="text-gray-500">استعلم عن نتائجك الرسمية بسهولة وأمان</p>
+              {isLoadingCloud && <div className="mt-4 text-[#e60000] font-bold animate-pulse">جاري تحديث البيانات من السحابة...</div>}
             </div>
 
             {isAdminMode ? (
-              <div className="max-w-xl mx-auto animate-fadeIn">
-                <div className="mb-6 flex justify-between items-center">
-                   <h3 className="text-2xl font-black text-[#4b0082]">لوحة تحكم المسؤول</h3>
-                   <button onClick={() => setIsAdminMode(false)} className="text-sm text-red-500 font-bold hover:underline">إغلاق الوضع</button>
+              <div className="max-w-2xl mx-auto space-y-6">
+                <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                  <h3 className="font-black text-[#4b0082] mb-4">الربط مع Google Sheets</h3>
+                  <p className="text-xs text-gray-500 mb-4">انسخ رابط "Publish as CSV" من جوجل شيت هنا ليتم تحديث الموقع تلقائياً للطلاب.</p>
+                  <div className="flex gap-2">
+                    <input type="text" value={cloudUrl} onChange={e => setCloudUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/.../pub?output=csv" className="flex-1 p-3 bg-gray-50 rounded-xl border border-gray-200 text-sm outline-none" />
+                    <button onClick={saveCloudUrl} className="bg-green-600 text-white px-6 py-3 rounded-xl font-bold text-sm">حفظ</button>
+                  </div>
                 </div>
                 <FileUpload onDataLoaded={handleDataLoaded} />
-                <div className="text-center text-[10px] text-gray-400 mt-4 bg-white p-4 rounded-xl border border-gray-100">
-                  <p className="font-bold text-gray-500 mb-2">تعليمات ملف الإكسيل:</p>
-                  <ul className="space-y-1">
-                    <li>1. يجب وجود شيت باسم <b className="text-[#4b0082]">Grade one</b> (لأولى ثانوي)</li>
-                    <li>2. يجب وجود شيت باسم <b className="text-[#4b0082]">Grade two</b> (لتانية ثانوي)</li>
-                    <li>3. النظام يبحث بذكاء عن أسماء الأعمدة (الوطنية، الدراسات، إلخ)</li>
-                  </ul>
-                </div>
               </div>
             ) : (
               <StudentSearch students={allStudents} onResultFound={setSelectedStudent} />
@@ -137,21 +169,7 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
-
-      <footer className="mt-20 py-8 text-center text-gray-400 text-sm border-t border-gray-200">
-        <p>&copy; {new Date().getFullYear()} مدرسة WE-Zayed للتكنولوجيا التطبيقية. جميع الحقوق محفوظة.</p>
-      </footer>
-
-      <style>{`
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes fadeInDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(50px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
-        .animate-fadeIn { animation: fadeIn 0.6s ease-out forwards; }
-        .animate-fadeInDown { animation: fadeInDown 0.6s ease-out forwards; }
-        .animate-slideUp { animation: slideUp 0.3s ease-out forwards; }
-        .animate-shake { animation: shake 0.2s ease-in-out infinite; }
-      `}</style>
+      <GeminiChat />
     </div>
   );
 };

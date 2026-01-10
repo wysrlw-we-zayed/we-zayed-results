@@ -10,138 +10,150 @@ interface FileUploadProps {
 const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
   const [isUploading, setIsUploading] = useState(false);
 
-  const normalizeString = (str: string) => {
+  const normalize = (str: any) => {
     if (!str) return "";
-    return str
-      .toString()
+    return str.toString().trim()
       .replace(/[أإآ]/g, 'ا')
       .replace(/ة/g, 'ه')
+      .replace(/[ىي]/g, 'ي')
       .replace(/\s+/g, '')
-      .trim()
       .toLowerCase();
   };
 
-  const getVal = (row: any, searchTerms: string[]) => {
-    const keys = Object.keys(row);
-    const normalizedSearchTerms = searchTerms.map(normalizeString);
+  const findValue = (row: any, keys: string[]) => {
+    const rowKeys = Object.keys(row);
+    const targetKeys = keys.map(normalize);
     
-    const foundKey = keys.find(k => {
-      const normalizedKey = normalizeString(k);
-      return normalizedSearchTerms.some(term => 
-        normalizedKey.includes(term) || term.includes(normalizedKey)
-      );
+    const actualKey = rowKeys.find(rk => {
+      const nrk = normalize(rk);
+      return targetKeys.some(tk => nrk.includes(tk) || tk.includes(nrk));
     });
     
-    return foundKey ? row[foundKey] : 0;
+    return actualKey ? row[actualKey] : null;
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const processWorkbook = (workbook: XLSX.WorkBook) => {
+    let allStudents: Student[] = [];
+    
+    const configs = [
+      { name: "Grade one", level: '1' as const },
+      { name: "Grade two", level: '2' as const }
+    ];
+
+    configs.forEach(config => {
+      const sheetName = workbook.SheetNames.find(n => normalize(n).includes(normalize(config.name)));
+      if (!sheetName) return;
+
+      const worksheet = workbook.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+      const students = data.map((row, idx): Student | null => {
+        const nationalId = String(findValue(row, ["الرقم القومي", "National ID", "ID"]) || "").replace(/\D/g, '');
+        if (nationalId.length < 10) return null;
+
+        const subjects = [
+          { name: "اللغة العربية", search: ["عربي", "Arabic"] },
+          { name: "التربية الدينية", search: ["دين", "Religion"] },
+          { name: "Advanced Math", search: ["Math", "رياضيات"] },
+          { name: "التربية الوطنية", search: ["وطنيه", "National"] },
+          { name: "Advanced Physics", search: ["Physics", "فيزياء"] },
+          { name: "الدراسات الفنية", search: ["الفنيه", "Technical"] },
+          { name: "Advanced English", search: ["انجليزي", "English"] }
+        ];
+
+        const grades: SubjectGrade[] = subjects.map(s => {
+          const val = findValue(row, s.search);
+          const score = val !== null ? Number(val) : 0;
+          return {
+            name: s.name,
+            score: isNaN(score) ? 0 : score,
+            maxScore: 50,
+            status: score >= 25 ? 'Pass' : 'Fail'
+          };
+        });
+
+        return {
+          id: `${config.level}-${idx}-${Date.now()}`,
+          name: String(findValue(row, ["الاسم", "Name", "اسم الطالب"]) || "طالب غير معروف"),
+          seatingNumber: String(findValue(row, ["رقم الجلوس", "Seating"]) || "000"),
+          nationalId,
+          class: String(findValue(row, ["الفصل", "Class"]) || "غير محدد"),
+          gradeLevel: config.level,
+          specialization: "Programming",
+          grades,
+          gpa: 0
+        };
+      }).filter((s): s is Student => s !== null);
+
+      allStudents = [...allStudents, ...students];
+    });
+
+    return allStudents;
+  };
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsUploading(true);
     const reader = new FileReader();
-
-    reader.onload = (event) => {
+    reader.onload = (evt) => {
       try {
-        const data = new Uint8Array(event.target?.result as ArrayBuffer);
+        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
-        let allParsedStudents: Student[] = [];
-
-        // Definition of subjects for each grade
-        const gradeConfigs = [
-          {
-            sheetName: "Grade one",
-            level: '1' as const,
-            subjects: [
-              { name: "اللغة العربية", search: ["عربية", "اللغة العربية", "Arabic"] },
-              { name: "التربية الدينية", search: ["دين", "دينية", "Religion"] },
-              { name: "Advanced Math", search: ["Math", "رياضيات", "Advanced Math"] },
-              { name: "التربية الوطنية", search: ["وطنية", "الوطنيه", "تربية وطنية", "National Education"] },
-              { name: "Advanced Physics", search: ["Physics", "فيزياء", "Advanced Physics"] },
-              { name: "الدراسات الفنية التخصصية النظرية", search: ["الدراسات الفنية", "تخصصية", "Technical Studies"] },
-              { name: "Advanced English", search: ["انجليزي", "English", "Advanced English"] },
-            ]
-          },
-          {
-            sheetName: "Grade two",
-            level: '2' as const,
-            subjects: [
-              { name: "اللغة العربية", search: ["عربية", "اللغة العربية", "Arabic"] },
-              { name: "التربية الدينية", search: ["دين", "دينية", "Religion"] },
-              { name: "الدراسات الاجتماعية", search: ["اجتماعية", "دراسات اجتماعية", "Social Studies"] },
-              { name: "Advanced Physics", search: ["Physics", "فيزياء", "Advanced Physics"] },
-              { name: "Advanced English", search: ["انجليزي", "English", "Advanced English"] },
-              { name: "Advanced Math", search: ["Math", "رياضيات", "Advanced Math"] },
-              { name: "الدراسات الفنية التخصصية النظرية", search: ["الدراسات الفنية", "تخصصية", "Technical Studies"] },
-            ]
-          }
-        ];
-
-        gradeConfigs.forEach(config => {
-          const worksheet = workbook.Sheets[config.sheetName];
-          if (!worksheet) return;
-
-          const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
-          const students = jsonData.map((row, index): Student => {
-            const grades: SubjectGrade[] = config.subjects.map(sub => {
-              const score = Number(getVal(row, sub.search) || 0);
-              return {
-                name: sub.name,
-                score: score,
-                maxScore: 50,
-                status: score >= 25 ? 'Pass' : 'Fail'
-              };
-            });
-
-            const totalScore = grades.reduce((sum, g) => sum + g.score, 0);
-            const gpa = (totalScore / (grades.length * 50)) * 4;
-
-            return {
-              id: `${config.level}-${index}`,
-              name: String(getVal(row, ["اسم الطالب", "Name"]) || "بدون اسم"),
-              seatingNumber: String(getVal(row, ["رقم الجلوس", "Seating Number"]) || ""),
-              nationalId: String(getVal(row, ["الرقم القومي", "National ID"]) || "").replace(/\D/g, ''),
-              class: String(getVal(row, ["الفصل", "Class"]) || ""),
-              gradeLevel: config.level,
-              specialization: "Programming" as const, // Fixed type mismatch
-              grades: grades,
-              gpa: parseFloat(gpa.toFixed(2))
-            };
-          });
-          allParsedStudents = [...allParsedStudents, ...students];
-        });
-
-        if (allParsedStudents.length === 0) {
-          throw new Error("لم يتم العثور على شيتات باسم Grade one أو Grade two");
+        const students = processWorkbook(workbook);
+        
+        if (students.length > 0) {
+          onDataLoaded(students);
+          alert(`تم بنجاح استيراد ${students.length} طالب.`);
+        } else {
+          alert("لم يتم العثور على بيانات صحيحة. تأكد من وجود شيتات باسم Grade one و Grade two.");
         }
-
-        onDataLoaded(allParsedStudents);
-        alert(`تم بنجاح تحميل بيانات ${allParsedStudents.length} طالب من الصفين الأول والثاني.`);
-      } catch (error) {
-        console.error("Error parsing excel:", error);
-        alert(`خطأ: ${error instanceof Error ? error.message : "فشل في قراءة الملف"}`);
+      } catch (err) {
+        alert("خطأ في قراءة الملف.");
       } finally {
         setIsUploading(false);
       }
     };
-
     reader.readAsArrayBuffer(file);
   };
 
   return (
-    <div className="bg-white border-2 border-dashed border-purple-200 rounded-2xl p-8 text-center hover:border-purple-400 transition-colors shadow-sm">
-      <input type="file" id="excel-upload" accept=".xlsx, .xls" className="hidden" onChange={handleFileUpload} />
-      <label htmlFor="excel-upload" className="cursor-pointer block">
-        <div className="bg-purple-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg className="w-8 h-8 text-[#4b0082]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-          </svg>
+    <div className="space-y-4">
+      <div className="bg-white border-4 border-dashed border-gray-200 rounded-3xl p-12 text-center hover:border-[#4b0082] transition-all group relative overflow-hidden">
+        <input type="file" id="up" hidden onChange={handleFile} accept=".xlsx, .xls" />
+        <label htmlFor="up" className="cursor-pointer">
+          <div className="bg-purple-50 w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:rotate-12 transition-transform">
+            <svg className="w-10 h-10 text-[#4b0082]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+          </div>
+          <p className="text-xl font-black text-gray-800">رفع ملف Excel محلي</p>
+          <p className="text-sm text-gray-400 mt-2">سيتم حفظ البيانات في متصفحك الحالي</p>
+        </label>
+        {isUploading && (
+          <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center">
+            <div className="w-10 h-10 border-4 border-[#4b0082] border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6">
+        <div className="flex items-start gap-4">
+          <div className="bg-blue-500 text-white p-2 rounded-lg">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <h4 className="font-bold text-blue-900 mb-1">نصيحة للمشاركة العامة:</h4>
+            <p className="text-sm text-blue-700 leading-relaxed">
+              لجعل النتائج متاحة لجميع الطلاب تلقائياً، يفضل استخدام رابط Google Sheets المباشر. 
+              (يمكنك طلب المساعدة لربط الموقع بـ Firebase لمزامنة دائمة).
+            </p>
+          </div>
         </div>
-        <h3 className="text-lg font-bold text-gray-800">تحميل ملف الإكسيل الشامل</h3>
-        <p className="text-sm text-gray-500 mt-2 italic">يجب أن يحتوي الملف على شيت باسم "Grade one" وشيت باسم "Grade two"</p>
-      </label>
-      {isUploading && <p className="mt-4 text-purple-600 animate-pulse font-bold">جاري تحليل بيانات Grade 1 & Grade 2...</p>}
+      </div>
     </div>
   );
 };

@@ -6,6 +6,7 @@ export class GeminiService {
   private ai: GoogleGenAI;
 
   constructor() {
+    // Access API_KEY from process.env.API_KEY as per guidelines
     const apiKey = process.env.API_KEY || "";
     this.ai = new GoogleGenAI({ apiKey });
   }
@@ -21,11 +22,12 @@ export class GeminiService {
     `;
 
     try {
+      // Use the correct API pattern: ai.models.generateContent
       const response = await this.ai.models.generateContent({
         model,
         contents: [
           ...history.map(msg => ({
-            role: msg.role,
+            role: msg.role === 'user' ? 'user' : 'model',
             parts: [{ text: msg.text }]
           })),
           { role: 'user', parts: [{ text: message }] }
@@ -36,6 +38,7 @@ export class GeminiService {
         }
       });
 
+      // Use the .text property directly
       return response.text || "عذراً، لم أتمكن من معالجة طلبك حالياً.";
     } catch (error) {
       console.error("Gemini Error:", error);
