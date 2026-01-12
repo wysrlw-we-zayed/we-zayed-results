@@ -30,113 +30,103 @@ const App: React.FC = () => {
   const processData = useCallback((workbook: XLSX.WorkBook) => {
     let allParsed: Student[] = [];
     
-    // دالة محسنة لتطبيع النصوص العربية والإنجليزية
     const normalize = (str: any) => {
       if (!str) return "";
-      return String(str)
-        .trim()
+      return String(str).trim()
         .replace(/[أإآ]/g, 'ا')
         .replace(/ة/g, 'ه')
         .replace(/[ىي]/g, 'ي')
-        .replace(/[\u064B-\u0652]/g, '') // حذف التشكيل
+        .replace(/[\u064B-\u0652]/g, '')
         .replace(/\s+/g, '')
         .toLowerCase();
     };
-    
-    const findVal = (row: any, searchTerms: string[]) => {
-      const keys = Object.keys(row);
-      const normalizedSearch = searchTerms.map(normalize);
-      
-      // أولاً: البحث عن مطابقة كاملة للكلمات المفتاحية
-      const exactMatchKey = keys.find(k => normalizedSearch.includes(normalize(k)));
-      if (exactMatchKey) return row[exactMatchKey];
-
-      // ثانياً: البحث عن أي مفتاح "يحتوي" على الكلمات المفتاحية
-      const partialMatchKey = keys.find(k => {
-        const nk = normalize(k);
-        return normalizedSearch.some(t => nk.includes(t));
-      });
-      return partialMatchKey ? row[partialMatchKey] : null;
-    };
 
     workbook.SheetNames.forEach(sName => {
-      const normalizedSheetName = normalize(sName);
+      const sNameNorm = normalize(sName);
       let gradeLevel: '1' | '2' | null = null;
-
-      if (normalizedSheetName.includes("gradeone") || normalizedSheetName.includes("اول")) {
-        gradeLevel = '1';
-      } else if (normalizedSheetName.includes("gradetwo") || normalizedSheetName.includes("ثاني")) {
-        gradeLevel = '2';
-      }
+      if (sNameNorm.includes("one") || sNameNorm.includes("اول")) gradeLevel = '1';
+      else if (sNameNorm.includes("two") || sNameNorm.includes("ثاني")) gradeLevel = '2';
 
       if (!gradeLevel) return;
 
-      // استخدام defval لضمان عدم تجاهل الأعمدة الفارغة
-      const data = XLSX.utils.sheet_to_json(workbook.Sheets[sName], { defval: "" }) as any[];
+      // قراءة الشيت كمصفوفة صفوف (Raw Rows)
+      const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sName], { header: 1 }) as any[][];
       
-      const mapped = data.map((row, idx): Student | null => {
-        // البحث عن الرقم القومي بعدة مسميات
-        const nidRaw = findVal(row, ["الرقم القومي", "رقم قومي", "nationalid", "id", "national", "القومي"]);
-        const nid = String(nidRaw || "").replace(/\D/g, '');
-        
-        // إذا لم يوجد رقم قومي صالح، نتجاهل الصف
-        if (nid.length < 10) return null;
-        
-        // قائمة موسعة جداً للبحث عن اسم الطالب
-        const studentNameRaw = findVal(row, [
-          "اسم الطالب", "الاسم", "اسم الطالب بالكامل", "name", "studentname", 
-          "اسم التلميذ", "الطالب", "fullname", "الاسم بالكامل"
-        ]);
-        
-        const studentName = studentNameRaw ? String(studentNameRaw).trim() : `طالب غير مسجل (صف ${idx + 1})`;
+      // 1. البحث عن صف العناوين
+      let headerRowIndex = -1;
+      const nameKeywords = ["الاسم", "name", "الطالب"];
+      const idKeywords = ["القومي", "national", "id"];
 
-        let subsDefinitions = [];
+      for (let i = 0; i < Math.min(rawRows.length, 20); i++) {
+        const rowStr = rawRows[i].map(c => normalize(c)).join("|");
+        const hasName = nameKeywords.some(k => rowStr.includes(normalize(k)));
+        const hasId = idKeywords.some(k => rowStr.includes(normalize(k)));
+        if (hasName && hasId) {
+          headerRowIndex = i;
+          break;
+        }
+      }
+
+      if (headerRowIndex === -1) return;
+
+      const headers = rawRows[headerRowIndex].map(h => normalize(h));
+      const dataRows = rawRows.slice(headerRowIndex + 1);
+
+      const mapped = dataRows.map((row, idx): Student | null => {
+        const getValue = (keywords: string[]) => {
+          const colIndex = headers.findIndex(h => keywords.some(k => h.includes(normalize(k))));
+          return colIndex !== -1 ? row[colIndex] : null;
+        };
+
+        const nidRaw = getValue(["الرقم القومي", "القومي", "national", "id"]);
+        const nid = String(nidRaw || "").replace(/\D/g, '');
+        if (nid.length < 10) return null;
+
+        const studentNameRaw = getValue(["الاسم", "name", "الطالب", "fullname"]);
+        const studentName = studentNameRaw ? String(studentNameRaw).trim() : `طالب صف ${headerRowIndex + idx + 2}`;
+
+        let subs = [];
         if (gradeLevel === '1') {
-          subsDefinitions = [
-            { n: "اللغة العربية", s: ["عربي", "arabic"] },
-            { n: "التربية الدينية", s: ["دين", "religion"] },
-            { n: "Advanced Math", s: ["math", "رياضيات"] },
-            { n: "التربية الوطنية", s: ["وطنيه", "national", "التربية الوطنية", "التربيه الوطنيه"] },
-            { n: "Advanced Physics", s: ["physics", "فيزياء"] },
-            { n: "الدراسات الفنية التخصصية النظرية", s: ["فنيه", "technical"] },
-            { n: "Advanced English", s: ["انجليزي", "english"] }
+          subs = [
+            { n: "اللغة العربية", k: ["عربي", "arabic"] },
+            { n: "التربية الدينية", k: ["دين", "religion"] },
+            { n: "Advanced Math", k: ["math", "رياضيات"] },
+            { n: "التربية الوطنية", k: ["وطنيه", "national", "التربية الوطنية"] },
+            { n: "Advanced Physics", k: ["physics", "فيزياء"] },
+            { n: "الدراسات الفنية التخصصية النظرية", k: ["فنيه", "technical"] },
+            { n: "Advanced English", k: ["انجليزي", "english"] }
           ];
         } else {
-          subsDefinitions = [
-            { n: "اللغة العربية", s: ["عربي", "arabic"] },
-            { n: "التربية الدينية", s: ["دين", "religion"] },
-            { n: "الدراسات الاجتماعية", s: ["دراسات", "social"] },
-            { n: "Advanced Physics", s: ["physics", "فيزياء"] },
-            { n: "Advanced English", s: ["انجليزي", "english"] },
-            { n: "Advanced Math", s: ["math", "رياضيات"] },
-            { n: "الدراسات الفنية التخصصية النظرية", s: ["فنيه", "technical"] }
+          subs = [
+            { n: "اللغة العربية", k: ["عربي", "arabic"] },
+            { n: "التربية الدينية", k: ["دين", "religion"] },
+            { n: "الدراسات الاجتماعية", k: ["دراسات", "social"] },
+            { n: "Advanced Physics", k: ["physics", "فيزياء"] },
+            { n: "Advanced English", k: ["انجليزي", "english"] },
+            { n: "Advanced Math", k: ["math", "رياضيات"] },
+            { n: "الدراسات الفنية التخصصية النظرية", k: ["فنيه", "technical"] }
           ];
         }
 
-        const grades: SubjectGrade[] = subsDefinitions.map(s => {
-          const val = findVal(row, s.s);
+        const grades: SubjectGrade[] = subs.map(s => {
+          const val = getValue(s.k);
           const score = (val !== undefined && val !== null && val !== "") ? Number(val) : 0;
-          return { 
-            name: s.n, 
-            score: isNaN(score) ? 0 : score, 
-            maxScore: 50, 
-            status: score >= 25 ? 'Pass' : 'Fail' 
-          };
+          return { name: s.n, score: isNaN(score) ? 0 : score, maxScore: 50, status: score >= 25 ? 'Pass' : 'Fail' };
         });
 
         return {
           id: `${gradeLevel}-${idx}-${Date.now()}`,
           name: studentName,
-          seatingNumber: String(findVal(row, ["جلوس", "seating", "رقم الجلوس", "رقم جلوس"]) || "0"),
+          seatingNumber: String(getValue(["جلوس", "seating", "رقم الجلوس"]) || "0"),
           nationalId: nid,
-          class: String(findVal(row, ["فصل", "class", "الفصل"]) || "-"),
+          class: String(getValue(["فصل", "class", "الفصل"]) || "-"),
           gradeLevel: gradeLevel as '1' | '2',
           specialization: "Programming",
           grades,
           gpa: 0
         };
       }).filter((s): s is Student => s !== null);
-      
+
       allParsed = [...allParsed, ...mapped];
     });
     return allParsed;
@@ -151,9 +141,7 @@ const App: React.FC = () => {
       const arrayBuffer = await response.arrayBuffer();
       const data = new Uint8Array(arrayBuffer);
       const workbook = XLSX.read(data, { type: 'array' });
-      
       const students = processData(workbook);
-      
       if (students.length > 0) {
         setAllStudents(students);
         localStorage.setItem('we_zayed_students', JSON.stringify(students));

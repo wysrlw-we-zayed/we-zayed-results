@@ -12,23 +12,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
 
   const normalize = (str: any) => {
     if (!str) return "";
-    return str.toString().trim()
+    return String(str).trim()
       .replace(/[أإآ]/g, 'ا')
       .replace(/ة/g, 'ه')
       .replace(/[ىي]/g, 'ي')
       .replace(/[\u064B-\u0652]/g, '')
       .replace(/\s+/g, '')
       .toLowerCase();
-  };
-
-  const findValue = (row: any, searchTerms: string[]) => {
-    const rowKeys = Object.keys(row);
-    const targetKeys = searchTerms.map(normalize);
-    const actualKey = rowKeys.find(rk => {
-      const nrk = normalize(rk);
-      return targetKeys.some(tk => nrk.includes(tk));
-    });
-    return actualKey ? row[actualKey] : null;
   };
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -44,48 +34,67 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
         let allParsed: Student[] = [];
 
         workbook.SheetNames.forEach(sName => {
-          const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sName], { defval: "" }) as any[];
           const sNameNorm = normalize(sName);
           let gradeLevel: '1' | '2' | null = null;
-          
           if (sNameNorm.includes('one') || sNameNorm.includes('اول')) gradeLevel = '1';
           else if (sNameNorm.includes('two') || sNameNorm.includes('ثاني')) gradeLevel = '2';
 
           if (!gradeLevel) return;
 
-          const students = sheetData.map((row, idx): Student | null => {
-            const nidRaw = findValue(row, ["الرقم القومي", "ID", "القومي", "national"]);
+          const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sName], { header: 1 }) as any[][];
+          
+          let headerRowIndex = -1;
+          for (let i = 0; i < Math.min(rawRows.length, 20); i++) {
+            const rowStr = rawRows[i].map(c => normalize(c)).join("|");
+            if (rowStr.includes("الاسم") && (rowStr.includes("القومي") || rowStr.includes("id"))) {
+              headerRowIndex = i;
+              break;
+            }
+          }
+
+          if (headerRowIndex === -1) return;
+
+          const headers = rawRows[headerRowIndex].map(h => normalize(h));
+          const dataRows = rawRows.slice(headerRowIndex + 1);
+
+          const students = dataRows.map((row, idx): Student | null => {
+            const getValue = (keywords: string[]) => {
+              const colIndex = headers.findIndex(h => keywords.some(k => h.includes(normalize(k))));
+              return colIndex !== -1 ? row[colIndex] : null;
+            };
+
+            const nidRaw = getValue(["الرقم القومي", "القومي", "national", "id"]);
             const nid = String(nidRaw || "").replace(/\D/g, '');
             if (nid.length < 10) return null;
 
-            const studentNameRaw = findValue(row, ["اسم الطالب", "الاسم", "name", "الطالب"]);
+            const studentNameRaw = getValue(["الاسم", "name", "الطالب"]);
             const studentName = studentNameRaw ? String(studentNameRaw).trim() : `طالب ${idx + 1}`;
 
             let subjects = [];
             if (gradeLevel === '1') {
               subjects = [
-                { name: "اللغة العربية", search: ["عربي", "arabic"] },
-                { name: "التربية الدينية", search: ["دين", "religion"] },
-                { name: "Advanced Math", search: ["math", "رياضيات"] },
-                { name: "التربية الوطنية", search: ["وطنيه", "national", "التربية الوطنية"] },
-                { name: "Advanced Physics", search: ["physics", "فيزياء"] },
-                { name: "الدراسات الفنية التخصصية النظرية", search: ["فنيه", "technical"] },
-                { name: "Advanced English", search: ["انجليزي", "english"] }
+                { name: "اللغة العربية", k: ["عربي", "arabic"] },
+                { name: "التربية الدينية", k: ["دين", "religion"] },
+                { name: "Advanced Math", k: ["math", "رياضيات"] },
+                { name: "التربية الوطنية", k: ["وطنيه", "national", "التربية الوطنية"] },
+                { name: "Advanced Physics", k: ["physics", "فيزياء"] },
+                { name: "الدراسات الفنية التخصصية النظرية", k: ["فنيه", "technical"] },
+                { name: "Advanced English", k: ["انجليزي", "english"] }
               ];
             } else {
               subjects = [
-                { name: "اللغة العربية", search: ["عربي", "arabic"] },
-                { name: "التربية الدينية", search: ["دين", "religion"] },
-                { name: "الدراسات الاجتماعية", search: ["دراسات", "social"] },
-                { name: "Advanced Physics", search: ["physics", "فيزياء"] },
-                { name: "Advanced English", search: ["انجليزي", "english"] },
-                { name: "Advanced Math", search: ["math", "رياضيات"] },
-                { name: "الدراسات الفنية التخصصية النظرية", search: ["فنيه", "technical"] }
+                { name: "اللغة العربية", k: ["عربي", "arabic"] },
+                { name: "التربية الدينية", k: ["دين", "religion"] },
+                { name: "الدراسات الاجتماعية", k: ["دراسات", "social"] },
+                { name: "Advanced Physics", k: ["physics", "فيزياء"] },
+                { name: "Advanced English", k: ["انجليزي", "english"] },
+                { name: "Advanced Math", k: ["math", "رياضيات"] },
+                { name: "الدراسات الفنية التخصصية النظرية", k: ["فنيه", "technical"] }
               ];
             }
 
             const grades: SubjectGrade[] = subjects.map(s => {
-              const val = findValue(row, s.search);
+              const val = getValue(s.k);
               const score = (val !== undefined && val !== null && val !== "") ? Number(val) : 0;
               return { name: s.name, score: isNaN(score) ? 0 : score, maxScore: 50, status: score >= 25 ? 'Pass' : 'Fail' };
             });
@@ -93,9 +102,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
             return {
               id: `${gradeLevel}-${idx}-${Date.now()}`,
               name: studentName,
-              seatingNumber: String(findValue(row, ["جلوس", "seating", "رقم الجلوس"]) || "0"),
+              seatingNumber: String(getValue(["جلوس", "seating", "رقم الجلوس"]) || "0"),
               nationalId: nid,
-              class: String(findValue(row, ["فصل", "class", "الفصل"]) || "-"),
+              class: String(getValue(["فصل", "class", "الفصل"]) || "-"),
               gradeLevel: gradeLevel as '1' | '2',
               specialization: "Programming",
               grades,
