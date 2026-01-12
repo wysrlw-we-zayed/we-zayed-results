@@ -5,12 +5,9 @@ import StudentSearch from './components/StudentSearch';
 import ResultDisplay from './components/ResultDisplay';
 import FileUpload from './components/FileUpload';
 import GeminiChat from './components/GeminiChat';
-import { Student } from './types';
+import { Student, SubjectGrade } from './types';
 import * as XLSX from 'xlsx';
 
-/**
- * ملاحظة: تم تغيير نهاية الرابط ليكون ملف إكسل كامل لضمان قراءة كافة الأوراق (Grade one & Grade two)
- */
 const DEFAULT_CLOUD_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ9_AL-QBMHK96tvzqEeCvMl3jgxx1kP5Wi8yT3BfgzUm47nk81hGs3cCfdp4kcfA/pub?output=xlsx"; 
 
 const App: React.FC = () => {
@@ -32,65 +29,114 @@ const App: React.FC = () => {
 
   const processData = useCallback((workbook: XLSX.WorkBook) => {
     let allParsed: Student[] = [];
-    const normalize = (str: any) => String(str || "").trim().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/\s+/g, '').toLowerCase();
     
-    const findVal = (row: any, search: string[]) => {
+    // دالة محسنة لتطبيع النصوص العربية والإنجليزية
+    const normalize = (str: any) => {
+      if (!str) return "";
+      return String(str)
+        .trim()
+        .replace(/[أإآ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/[ىي]/g, 'ي')
+        .replace(/[\u064B-\u0652]/g, '') // حذف التشكيل
+        .replace(/\s+/g, '')
+        .toLowerCase();
+    };
+    
+    const findVal = (row: any, searchTerms: string[]) => {
       const keys = Object.keys(row);
-      const target = search.map(normalize);
-      const found = keys.find(k => target.some(t => normalize(k).includes(t)));
-      return found ? row[found] : null;
+      const normalizedSearch = searchTerms.map(normalize);
+      
+      // أولاً: البحث عن مطابقة كاملة للكلمات المفتاحية
+      const exactMatchKey = keys.find(k => normalizedSearch.includes(normalize(k)));
+      if (exactMatchKey) return row[exactMatchKey];
+
+      // ثانياً: البحث عن أي مفتاح "يحتوي" على الكلمات المفتاحية
+      const partialMatchKey = keys.find(k => {
+        const nk = normalize(k);
+        return normalizedSearch.some(t => nk.includes(t));
+      });
+      return partialMatchKey ? row[partialMatchKey] : null;
     };
 
     workbook.SheetNames.forEach(sName => {
       const normalizedSheetName = normalize(sName);
       let gradeLevel: '1' | '2' | null = null;
 
-      // الربط الصارم بناءً على طلبك
-      if (normalizedSheetName === normalize("Grade one") || normalizedSheetName.includes("اول")) {
+      if (normalizedSheetName.includes("gradeone") || normalizedSheetName.includes("اول")) {
         gradeLevel = '1';
-      } else if (normalizedSheetName === normalize("Grade two") || normalizedSheetName.includes("ثاني")) {
+      } else if (normalizedSheetName.includes("gradetwo") || normalizedSheetName.includes("ثاني")) {
         gradeLevel = '2';
       }
 
-      // إذا لم يكن اسم الورقة مطابقاً لأي صف، نتخطاها
       if (!gradeLevel) return;
 
-      const data = XLSX.utils.sheet_to_json(workbook.Sheets[sName]) as any[];
+      // استخدام defval لضمان عدم تجاهل الأعمدة الفارغة
+      const data = XLSX.utils.sheet_to_json(workbook.Sheets[sName], { defval: "" }) as any[];
+      
       const mapped = data.map((row, idx): Student | null => {
-        const nid = String(findVal(row, ["الرقم القومي", "ID", "National"]) || "").replace(/\D/g, '');
+        // البحث عن الرقم القومي بعدة مسميات
+        const nidRaw = findVal(row, ["الرقم القومي", "رقم قومي", "nationalid", "id", "national", "القومي"]);
+        const nid = String(nidRaw || "").replace(/\D/g, '');
+        
+        // إذا لم يوجد رقم قومي صالح، نتجاهل الصف
         if (nid.length < 10) return null;
         
-        const subs = [
-          { n: "اللغة العربية", s: ["عربي", "Arabic"] },
-          { n: "التربية الدينية", s: ["دين", "Religion"] },
-          { n: "Advanced Math", s: ["Math", "رياضيات"] },
-          { n: "التربية الوطنية", s: ["وطنيه", "National", "التربية الوطنية", "التربيه الوطنيه"] },
-          { n: "Advanced Physics", s: ["Physics", "فيزياء"] },
-          { n: "الدراسات الفنية التخصصية النظرية", s: ["فنيه", "Technical"] },
-          { n: "Advanced English", s: ["انجليزي", "English"] }
-        ];
+        // قائمة موسعة جداً للبحث عن اسم الطالب
+        const studentNameRaw = findVal(row, [
+          "اسم الطالب", "الاسم", "اسم الطالب بالكامل", "name", "studentname", 
+          "اسم التلميذ", "الطالب", "fullname", "الاسم بالكامل"
+        ]);
+        
+        const studentName = studentNameRaw ? String(studentNameRaw).trim() : `طالب غير مسجل (صف ${idx + 1})`;
+
+        let subsDefinitions = [];
+        if (gradeLevel === '1') {
+          subsDefinitions = [
+            { n: "اللغة العربية", s: ["عربي", "arabic"] },
+            { n: "التربية الدينية", s: ["دين", "religion"] },
+            { n: "Advanced Math", s: ["math", "رياضيات"] },
+            { n: "التربية الوطنية", s: ["وطنيه", "national", "التربية الوطنية", "التربيه الوطنيه"] },
+            { n: "Advanced Physics", s: ["physics", "فيزياء"] },
+            { n: "الدراسات الفنية التخصصية النظرية", s: ["فنيه", "technical"] },
+            { n: "Advanced English", s: ["انجليزي", "english"] }
+          ];
+        } else {
+          subsDefinitions = [
+            { n: "اللغة العربية", s: ["عربي", "arabic"] },
+            { n: "التربية الدينية", s: ["دين", "religion"] },
+            { n: "الدراسات الاجتماعية", s: ["دراسات", "social"] },
+            { n: "Advanced Physics", s: ["physics", "فيزياء"] },
+            { n: "Advanced English", s: ["انجليزي", "english"] },
+            { n: "Advanced Math", s: ["math", "رياضيات"] },
+            { n: "الدراسات الفنية التخصصية النظرية", s: ["فنيه", "technical"] }
+          ];
+        }
+
+        const grades: SubjectGrade[] = subsDefinitions.map(s => {
+          const val = findVal(row, s.s);
+          const score = (val !== undefined && val !== null && val !== "") ? Number(val) : 0;
+          return { 
+            name: s.n, 
+            score: isNaN(score) ? 0 : score, 
+            maxScore: 50, 
+            status: score >= 25 ? 'Pass' : 'Fail' 
+          };
+        });
 
         return {
           id: `${gradeLevel}-${idx}-${Date.now()}`,
-          name: String(findVal(row, ["الاسم", "Name", "اسم الطالب"]) || "طالب"),
-          seatingNumber: String(findVal(row, ["جلوس", "Seating", "رقم الجلوس"]) || "0"),
+          name: studentName,
+          seatingNumber: String(findVal(row, ["جلوس", "seating", "رقم الجلوس", "رقم جلوس"]) || "0"),
           nationalId: nid,
-          class: String(findVal(row, ["فصل", "Class", "الفصل"]) || "-"),
+          class: String(findVal(row, ["فصل", "class", "الفصل"]) || "-"),
           gradeLevel: gradeLevel as '1' | '2',
           specialization: "Programming",
-          grades: subs.map(s => {
-            const val = findVal(row, s.s);
-            const score = val !== null ? Number(val) : 0;
-            return { 
-              name: s.n, 
-              score: isNaN(score) ? 0 : score, 
-              maxScore: 50, 
-              status: score >= 25 ? 'Pass' : 'Fail' 
-            };
-          }),
+          grades,
           gpa: 0
         };
       }).filter((s): s is Student => s !== null);
+      
       allParsed = [...allParsed, ...mapped];
     });
     return allParsed;
@@ -111,7 +157,6 @@ const App: React.FC = () => {
       if (students.length > 0) {
         setAllStudents(students);
         localStorage.setItem('we_zayed_students', JSON.stringify(students));
-        console.log(`Successfully loaded ${students.length} students from cloud.`);
       }
     } catch (e) {
       console.error("Cloud Sync Error:", e);

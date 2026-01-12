@@ -16,14 +16,18 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
       .replace(/[أإآ]/g, 'ا')
       .replace(/ة/g, 'ه')
       .replace(/[ىي]/g, 'ي')
+      .replace(/[\u064B-\u0652]/g, '')
       .replace(/\s+/g, '')
       .toLowerCase();
   };
 
-  const findValue = (row: any, keys: string[]) => {
+  const findValue = (row: any, searchTerms: string[]) => {
     const rowKeys = Object.keys(row);
-    const targetKeys = keys.map(normalize);
-    const actualKey = rowKeys.find(rk => targetKeys.some(tk => normalize(rk).includes(tk)));
+    const targetKeys = searchTerms.map(normalize);
+    const actualKey = rowKeys.find(rk => {
+      const nrk = normalize(rk);
+      return targetKeys.some(tk => nrk.includes(tk));
+    });
     return actualKey ? row[actualKey] : null;
   };
 
@@ -40,36 +44,59 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
         let allParsed: Student[] = [];
 
         workbook.SheetNames.forEach(sName => {
-          const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sName]) as any[];
-          const gradeLevel: '1' | '2' = (normalize(sName).includes('two') || normalize(sName).includes('ثاني')) ? '2' : '1';
+          const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sName], { defval: "" }) as any[];
+          const sNameNorm = normalize(sName);
+          let gradeLevel: '1' | '2' | null = null;
+          
+          if (sNameNorm.includes('one') || sNameNorm.includes('اول')) gradeLevel = '1';
+          else if (sNameNorm.includes('two') || sNameNorm.includes('ثاني')) gradeLevel = '2';
+
+          if (!gradeLevel) return;
 
           const students = sheetData.map((row, idx): Student | null => {
-            const nid = String(findValue(row, ["الرقم القومي", "ID"]) || "").replace(/\D/g, '');
+            const nidRaw = findValue(row, ["الرقم القومي", "ID", "القومي", "national"]);
+            const nid = String(nidRaw || "").replace(/\D/g, '');
             if (nid.length < 10) return null;
 
-            const subjects = [
-              { name: "اللغة العربية", search: ["عربي"] },
-              { name: "التربية الدينية", search: ["دين"] },
-              { name: "Advanced Math", search: ["Math"] },
-              { name: "التربية الوطنية", search: ["وطنيه", "National", "التربية الوطنية"] },
-              { name: "Advanced Physics", search: ["Physics"] },
-              { name: "الدراسات الفنية التخصصية النظرية", search: ["فنيه", "Technical"] },
-              { name: "Advanced English", search: ["انجليزي"] }
-            ];
+            const studentNameRaw = findValue(row, ["اسم الطالب", "الاسم", "name", "الطالب"]);
+            const studentName = studentNameRaw ? String(studentNameRaw).trim() : `طالب ${idx + 1}`;
+
+            let subjects = [];
+            if (gradeLevel === '1') {
+              subjects = [
+                { name: "اللغة العربية", search: ["عربي", "arabic"] },
+                { name: "التربية الدينية", search: ["دين", "religion"] },
+                { name: "Advanced Math", search: ["math", "رياضيات"] },
+                { name: "التربية الوطنية", search: ["وطنيه", "national", "التربية الوطنية"] },
+                { name: "Advanced Physics", search: ["physics", "فيزياء"] },
+                { name: "الدراسات الفنية التخصصية النظرية", search: ["فنيه", "technical"] },
+                { name: "Advanced English", search: ["انجليزي", "english"] }
+              ];
+            } else {
+              subjects = [
+                { name: "اللغة العربية", search: ["عربي", "arabic"] },
+                { name: "التربية الدينية", search: ["دين", "religion"] },
+                { name: "الدراسات الاجتماعية", search: ["دراسات", "social"] },
+                { name: "Advanced Physics", search: ["physics", "فيزياء"] },
+                { name: "Advanced English", search: ["انجليزي", "english"] },
+                { name: "Advanced Math", search: ["math", "رياضيات"] },
+                { name: "الدراسات الفنية التخصصية النظرية", search: ["فنيه", "technical"] }
+              ];
+            }
 
             const grades: SubjectGrade[] = subjects.map(s => {
               const val = findValue(row, s.search);
-              const score = val !== null ? Number(val) : 0;
+              const score = (val !== undefined && val !== null && val !== "") ? Number(val) : 0;
               return { name: s.name, score: isNaN(score) ? 0 : score, maxScore: 50, status: score >= 25 ? 'Pass' : 'Fail' };
             });
 
             return {
               id: `${gradeLevel}-${idx}-${Date.now()}`,
-              name: String(findValue(row, ["الاسم", "Name"]) || "طالب"),
-              seatingNumber: String(findValue(row, ["جلوس", "Seating"]) || "0"),
+              name: studentName,
+              seatingNumber: String(findValue(row, ["جلوس", "seating", "رقم الجلوس"]) || "0"),
               nationalId: nid,
-              class: String(findValue(row, ["فصل", "Class"]) || "-"),
-              gradeLevel: gradeLevel,
+              class: String(findValue(row, ["فصل", "class", "الفصل"]) || "-"),
+              gradeLevel: gradeLevel as '1' | '2',
               specialization: "Programming",
               grades,
               gpa: 0
@@ -101,7 +128,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
           </svg>
         </div>
         <p className="text-xl font-black text-gray-800">رفع ملف Excel محلي</p>
-        <p className="text-sm text-gray-400 mt-2">تأكد أن الشيتات تحتوي على أسماء الصفوف</p>
+        <p className="text-sm text-gray-400 mt-2">تأكد أن الشيتات تحتوي على أسماء الصفوف (Grade one / Grade two)</p>
       </label>
       {isUploading && (
         <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center">
