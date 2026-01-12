@@ -8,9 +8,6 @@ import GeminiChat from './components/GeminiChat';
 import { Student } from './types';
 import * as XLSX from 'xlsx';
 
-/**
- * رابط Google Sheets المنشور بصيغة CSV لمدرسة WE-Zayed
- */
 const DEFAULT_CLOUD_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ9_AL-QBMHK96tvzqEeCvMl3jgxx1kP5Wi8yT3BfgzUm47nk81hGs3cCfdp4kcfA/pub?output=csv"; 
 
 const App: React.FC = () => {
@@ -42,8 +39,8 @@ const App: React.FC = () => {
     };
 
     workbook.SheetNames.forEach(sName => {
-      const data = XLSX.utils.sheet_to_json(workbook.Sheets[sName]) as any[];
-      // تحديد الصف بناءً على اسم الشيت أو محتواه
+      const sheet = workbook.Sheets[sName];
+      const data = XLSX.utils.sheet_to_json(sheet) as any[];
       const isGrade2 = normalize(sName).includes('two') || normalize(sName).includes('ثاني');
       const gradeLevel: '1' | '2' = isGrade2 ? '2' : '1';
 
@@ -95,10 +92,10 @@ const App: React.FC = () => {
       const finalUrl = `${url}${separator}nocache=${Date.now()}`;
       
       const res = await fetch(finalUrl);
-      if (!res.ok) throw new Error("فشل الاتصال");
+      if (!res.ok) throw new Error("Connection Failed");
       
       const text = await res.text();
-      // قراءة البيانات من CSV أو Excel
+      // Use 'string' type for CSV data
       const wb = XLSX.read(text, { type: 'string' });
       const students = processData(wb);
       
