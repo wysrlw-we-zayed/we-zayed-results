@@ -51,7 +51,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
               { name: "اللغة العربية", search: ["عربي"] },
               { name: "التربية الدينية", search: ["دين"] },
               { name: "Advanced Math", search: ["Math"] },
-              { name: "التربية الوطنية", search: ["وطنيه"] },
+              { name: "التربية الوطنية", search: ["وطنيه", "National", "التربية الوطنية"] },
               { name: "Advanced Physics", search: ["Physics"] },
               { name: "الدراسات الفنية التخصصية النظرية", search: ["فنيه", "Technical"] },
               { name: "Advanced English", search: ["انجليزي"] }
