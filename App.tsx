@@ -9,9 +9,9 @@ import { Student } from './types';
 import * as XLSX from 'xlsx';
 
 /**
- * رابط Google Sheets المنشور بصيغة CSV لمدرسة WE-Zayed
+ * ملاحظة: تم تغيير نهاية الرابط ليكون ملف إكسل كامل لضمان قراءة كافة الأوراق (Grade one & Grade two)
  */
-const DEFAULT_CLOUD_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ9_AL-QBMHK96tvzqEeCvMl3jgxx1kP5Wi8yT3BfgzUm47nk81hGs3cCfdp4kcfA/pub?output=csv"; 
+const DEFAULT_CLOUD_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ9_AL-QBMHK96tvzqEeCvMl3jgxx1kP5Wi8yT3BfgzUm47nk81hGs3cCfdp4kcfA/pub?output=xlsx"; 
 
 const App: React.FC = () => {
   const [allStudents, setAllStudents] = useState<Student[]>([]);
@@ -42,10 +42,20 @@ const App: React.FC = () => {
     };
 
     workbook.SheetNames.forEach(sName => {
-      const data = XLSX.utils.sheet_to_json(workbook.Sheets[sName]) as any[];
-      const isGrade2 = normalize(sName).includes('two') || normalize(sName).includes('ثاني');
-      const gradeLevel: '1' | '2' = isGrade2 ? '2' : '1';
+      const normalizedSheetName = normalize(sName);
+      let gradeLevel: '1' | '2' | null = null;
 
+      // الربط الصارم بناءً على طلبك
+      if (normalizedSheetName === normalize("Grade one") || normalizedSheetName.includes("اول")) {
+        gradeLevel = '1';
+      } else if (normalizedSheetName === normalize("Grade two") || normalizedSheetName.includes("ثاني")) {
+        gradeLevel = '2';
+      }
+
+      // إذا لم يكن اسم الورقة مطابقاً لأي صف، نتخطاها
+      if (!gradeLevel) return;
+
+      const data = XLSX.utils.sheet_to_json(workbook.Sheets[sName]) as any[];
       const mapped = data.map((row, idx): Student | null => {
         const nid = String(findVal(row, ["الرقم القومي", "ID", "National"]) || "").replace(/\D/g, '');
         if (nid.length < 10) return null;
@@ -66,7 +76,7 @@ const App: React.FC = () => {
           seatingNumber: String(findVal(row, ["جلوس", "Seating", "رقم الجلوس"]) || "0"),
           nationalId: nid,
           class: String(findVal(row, ["فصل", "Class", "الفصل"]) || "-"),
-          gradeLevel: gradeLevel,
+          gradeLevel: gradeLevel as '1' | '2',
           specialization: "Programming",
           grades: subs.map(s => {
             const val = findVal(row, s.s);
@@ -90,19 +100,18 @@ const App: React.FC = () => {
     if (!url || !url.startsWith('http')) return;
     setIsLoadingCloud(true);
     try {
-      const separator = url.includes('?') ? '&' : '?';
-      const finalUrl = `${url}${separator}nocache=${Date.now()}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("Network response was not ok");
+      const arrayBuffer = await response.arrayBuffer();
+      const data = new Uint8Array(arrayBuffer);
+      const workbook = XLSX.read(data, { type: 'array' });
       
-      const res = await fetch(finalUrl);
-      if (!res.ok) throw new Error("فشل الاتصال");
-      
-      const text = await res.text();
-      const wb = XLSX.read(text, { type: 'string' });
-      const students = processData(wb);
+      const students = processData(workbook);
       
       if (students.length > 0) {
         setAllStudents(students);
         localStorage.setItem('we_zayed_students', JSON.stringify(students));
+        console.log(`Successfully loaded ${students.length} students from cloud.`);
       }
     } catch (e) {
       console.error("Cloud Sync Error:", e);
@@ -189,7 +198,7 @@ const App: React.FC = () => {
                     type="text" 
                     value={cloudUrl} 
                     onChange={e => setCloudUrl(e.target.value)} 
-                    placeholder="رابط CSV المنشور..." 
+                    placeholder="رابط XLSX المنشور..." 
                     className="w-full p-4 bg-gray-50 rounded-2xl mb-4 border border-gray-200 focus:ring-2 focus:ring-purple-200 outline-none" 
                   />
                   <button onClick={() => fetchCloudData(cloudUrl)} className="w-full bg-[#4b0082] text-white py-4 rounded-2xl font-bold hover:shadow-lg transition-shadow">تحديث المصدر لجميع الطلاب</button>
