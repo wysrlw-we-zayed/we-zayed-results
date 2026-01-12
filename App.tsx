@@ -30,14 +30,15 @@ const App: React.FC = () => {
   const processData = useCallback((workbook: XLSX.WorkBook) => {
     let allParsed: Student[] = [];
     
+    // دالة تنظيف وتطبيع فائقة القوة
     const normalize = (str: any) => {
-      if (!str) return "";
-      return String(str).trim()
+      if (str === null || str === undefined) return "";
+      return String(str)
+        .replace(/[\u064B-\u0652]/g, '') // إزالة التشكيل
         .replace(/[أإآ]/g, 'ا')
         .replace(/ة/g, 'ه')
         .replace(/[ىي]/g, 'ي')
-        .replace(/[\u064B-\u0652]/g, '')
-        .replace(/\s+/g, '')
+        .replace(/[^a-zA-Z0-9\u0621-\u064A]/g, '') // إزالة أي رمز أو مسافة (حروف وأرقام فقط)
         .toLowerCase();
     };
 
@@ -49,18 +50,17 @@ const App: React.FC = () => {
 
       if (!gradeLevel) return;
 
-      // قراءة الشيت كمصفوفة صفوف (Raw Rows)
-      const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sName], { header: 1 }) as any[][];
+      const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sName], { header: 1, defval: "" }) as any[][];
       
-      // 1. البحث عن صف العناوين
+      // البحث عن صف العناوين بدقة
       let headerRowIndex = -1;
-      const nameKeywords = ["الاسم", "name", "الطالب"];
-      const idKeywords = ["القومي", "national", "id"];
+      const nameKeywords = ["الاسم", "name", "طالب", "تلميذ"];
+      const idKeywords = ["قومي", "national", "id", "هويه"];
 
-      for (let i = 0; i < Math.min(rawRows.length, 20); i++) {
-        const rowStr = rawRows[i].map(c => normalize(c)).join("|");
-        const hasName = nameKeywords.some(k => rowStr.includes(normalize(k)));
-        const hasId = idKeywords.some(k => rowStr.includes(normalize(k)));
+      for (let i = 0; i < Math.min(rawRows.length, 30); i++) {
+        const rowData = rawRows[i].map(c => normalize(c));
+        const hasName = nameKeywords.some(k => rowData.some(cell => cell.includes(normalize(k))));
+        const hasId = idKeywords.some(k => rowData.some(cell => cell.includes(normalize(k))));
         if (hasName && hasId) {
           headerRowIndex = i;
           break;
@@ -74,7 +74,8 @@ const App: React.FC = () => {
 
       const mapped = dataRows.map((row, idx): Student | null => {
         const getValue = (keywords: string[]) => {
-          const colIndex = headers.findIndex(h => keywords.some(k => h.includes(normalize(k))));
+          const normalizedK = keywords.map(normalize);
+          const colIndex = headers.findIndex(h => normalizedK.some(k => h.includes(k)));
           return colIndex !== -1 ? row[colIndex] : null;
         };
 
@@ -83,30 +84,28 @@ const App: React.FC = () => {
         if (nid.length < 10) return null;
 
         const studentNameRaw = getValue(["الاسم", "name", "الطالب", "fullname"]);
-        const studentName = studentNameRaw ? String(studentNameRaw).trim() : `طالب صف ${headerRowIndex + idx + 2}`;
+        // التأكد من أن القيمة ليست فارغة قبل تعيين الاسم الافتراضي
+        const studentName = (studentNameRaw && String(studentNameRaw).trim().length > 2) 
+          ? String(studentNameRaw).trim() 
+          : `طالب رقم ${idx + 1}`;
 
-        let subs = [];
-        if (gradeLevel === '1') {
-          subs = [
-            { n: "اللغة العربية", k: ["عربي", "arabic"] },
-            { n: "التربية الدينية", k: ["دين", "religion"] },
-            { n: "Advanced Math", k: ["math", "رياضيات"] },
-            { n: "التربية الوطنية", k: ["وطنيه", "national", "التربية الوطنية"] },
-            { n: "Advanced Physics", k: ["physics", "فيزياء"] },
-            { n: "الدراسات الفنية التخصصية النظرية", k: ["فنيه", "technical"] },
-            { n: "Advanced English", k: ["انجليزي", "english"] }
-          ];
-        } else {
-          subs = [
-            { n: "اللغة العربية", k: ["عربي", "arabic"] },
-            { n: "التربية الدينية", k: ["دين", "religion"] },
-            { n: "الدراسات الاجتماعية", k: ["دراسات", "social"] },
-            { n: "Advanced Physics", k: ["physics", "فيزياء"] },
-            { n: "Advanced English", k: ["انجليزي", "english"] },
-            { n: "Advanced Math", k: ["math", "رياضيات"] },
-            { n: "الدراسات الفنية التخصصية النظرية", k: ["فنيه", "technical"] }
-          ];
-        }
+        let subs = gradeLevel === '1' ? [
+          { n: "اللغة العربية", k: ["عربي", "arabic"] },
+          { n: "التربية الدينية", k: ["دين", "religion"] },
+          { n: "Advanced Math", k: ["math", "رياضيات"] },
+          { n: "التربية الوطنية", k: ["وطنيه", "national", "التربية الوطنية"] },
+          { n: "Advanced Physics", k: ["physics", "فيزياء"] },
+          { n: "الدراسات الفنية التخصصية النظرية", k: ["فنيه", "technical"] },
+          { n: "Advanced English", k: ["انجليزي", "english"] }
+        ] : [
+          { n: "اللغة العربية", k: ["عربي", "arabic"] },
+          { n: "التربية الدينية", k: ["دين", "religion"] },
+          { n: "الدراسات الاجتماعية", k: ["دراسات", "social"] },
+          { n: "Advanced Physics", k: ["physics", "فيزياء"] },
+          { n: "Advanced English", k: ["انجليزي", "english"] },
+          { n: "Advanced Math", k: ["math", "رياضيات"] },
+          { n: "الدراسات الفنية التخصصية النظرية", k: ["فنيه", "technical"] }
+        ];
 
         const grades: SubjectGrade[] = subs.map(s => {
           const val = getValue(s.k);
@@ -137,10 +136,9 @@ const App: React.FC = () => {
     setIsLoadingCloud(true);
     try {
       const response = await fetch(url);
-      if (!response.ok) throw new Error("Network response was not ok");
+      if (!response.ok) throw new Error("Cloud fetch failed");
       const arrayBuffer = await response.arrayBuffer();
-      const data = new Uint8Array(arrayBuffer);
-      const workbook = XLSX.read(data, { type: 'array' });
+      const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
       const students = processData(workbook);
       if (students.length > 0) {
         setAllStudents(students);
@@ -217,7 +215,7 @@ const App: React.FC = () => {
               {isLoadingCloud && (
                 <div className="mt-6 flex items-center justify-center gap-2 text-[#e60000] font-bold">
                   <div className="w-2 h-2 bg-[#e60000] rounded-full animate-bounce"></div>
-                  <span>جاري تحديث البيانات من السحابة...</span>
+                  <span>جاري تحديث البيانات...</span>
                 </div>
               )}
             </div>
@@ -225,16 +223,15 @@ const App: React.FC = () => {
             {isAdminMode ? (
               <div className="max-w-2xl mx-auto space-y-6">
                 <div className="bg-white p-8 rounded-3xl shadow-xl border border-purple-100">
-                  <h3 className="font-black mb-4 text-gray-800">إعدادات الربط السحابي</h3>
-                  <p className="text-xs text-gray-500 mb-4">يتم سحب البيانات حالياً من Google Sheets تلقائياً.</p>
+                  <h3 className="font-black mb-4 text-gray-800">إعدادات المصدر السحابي</h3>
                   <input 
                     type="text" 
                     value={cloudUrl} 
                     onChange={e => setCloudUrl(e.target.value)} 
-                    placeholder="رابط XLSX المنشور..." 
-                    className="w-full p-4 bg-gray-50 rounded-2xl mb-4 border border-gray-200 focus:ring-2 focus:ring-purple-200 outline-none" 
+                    placeholder="رابط ملف XLSX..." 
+                    className="w-full p-4 bg-gray-50 rounded-2xl mb-4 border border-gray-200 outline-none" 
                   />
-                  <button onClick={() => fetchCloudData(cloudUrl)} className="w-full bg-[#4b0082] text-white py-4 rounded-2xl font-bold hover:shadow-lg transition-shadow">تحديث المصدر لجميع الطلاب</button>
+                  <button onClick={() => fetchCloudData(cloudUrl)} className="w-full bg-[#4b0082] text-white py-4 rounded-2xl font-bold">تحديث البيانات الآن</button>
                 </div>
                 <FileUpload onDataLoaded={handleDataLoaded} />
               </div>
